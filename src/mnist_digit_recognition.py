@@ -1,113 +1,150 @@
-import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models
+import numpy as np
 import matplotlib.pyplot as plt
+import os
 
-# Load the MNIST dataset
-(train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
+def load_and_preprocess_data():
+    """Load and preprocess MNIST dataset."""
+    print("Loading MNIST dataset...")
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    
+    # Normalize pixel values
+    x_train = x_train.astype('float32') / 255.0
+    x_test = x_test.astype('float32') / 255.0
+    
+    # Reshape for CNN input
+    x_train = x_train.reshape(x_train.shape[0], 28, 28, 1)
+    x_test = x_test.reshape(x_test.shape[0], 28, 28, 1)
+    
+    # Convert labels to categorical
+    y_train = tf.keras.utils.to_categorical(y_train, 10)
+    y_test = tf.keras.utils.to_categorical(y_test, 10)
+    
+    return (x_train, y_train), (x_test, y_test)
 
-# Normalize pixel values to be between 0 and 1
-train_images = train_images.astype('float32') / 255.0
-test_images = test_images.astype('float32') / 255.0
-
-# Reshape the images to add the channel dimension (MNIST is grayscale)
-train_images = train_images.reshape(train_images.shape[0], 28, 28, 1)
-test_images = test_images.reshape(test_images.shape[0], 28, 28, 1)
-
-# Print the shape of the training data
-print(f"Training data shape: {train_images.shape}")
-print(f"Training labels shape: {train_labels.shape}")
-
-# One-hot encode the labels
-train_labels = tf.keras.utils.to_categorical(train_labels, 10)
-test_labels = tf.keras.utils.to_categorical(test_labels, 10)
-
-# Create the model
 def create_model():
-    model = models.Sequential()
+    """Create and compile the CNN model."""
+    print("Creating CNN model...")
+    model = models.Sequential([
+        # First Convolutional Layer
+        layers.Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D((2, 2)),
+        
+        # Second Convolutional Layer
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.BatchNormalization(),
+        layers.MaxPooling2D((2, 2)),
+        
+        # Third Convolutional Layer
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.BatchNormalization(),
+        
+        # Flatten and Dense Layers
+        layers.Flatten(),
+        layers.Dense(128, activation='relu'),
+        layers.Dropout(0.5),
+        layers.Dense(10, activation='softmax')
+    ])
     
-    # Convolutional layers
-    model.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Conv2D(64, (3, 3), activation='relu'))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Conv2D(64, (3, 3), activation='relu'))
-    
-    # Dense layers
-    model.add(layers.Flatten())
-    model.add(layers.Dense(64, activation='relu'))
-    model.add(layers.Dropout(0.5))  # Dropout for regularization
-    model.add(layers.Dense(10, activation='softmax'))
-    
-    # Compile the model
+    # Compile model
     model.compile(optimizer='adam',
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
+                 loss='categorical_crossentropy',
+                 metrics=['accuracy'])
     
     return model
 
-# Create and view the model summary
-model = create_model()
-model.summary()
+def train_model(model, x_train, y_train, x_test, y_test, epochs=10):
+    """Train the model and return training history."""
+    print("\nTraining model...")
+    history = model.fit(x_train, y_train,
+                       batch_size=128,
+                       epochs=epochs,
+                       validation_data=(x_test, y_test),
+                       verbose=1)
+    return history
 
-# Train the model
-history = model.fit(train_images, train_labels, epochs=10, 
-                    validation_data=(test_images, test_labels),
-                    batch_size=128)
+def evaluate_model(model, x_test, y_test):
+    """Evaluate model performance."""
+    print("\nEvaluating model...")
+    test_loss, test_accuracy = model.evaluate(x_test, y_test, verbose=0)
+    print(f"Test accuracy: {test_accuracy*100:.1f}%")
+    print(f"Test loss: {test_loss:.4f}")
+    return test_accuracy, test_loss
 
-# Evaluate the model
-test_loss, test_acc = model.evaluate(test_images, test_labels)
-print(f"\nTest accuracy: {test_acc:.4f}")
-
-# Save the model
-model.save('models/mnist_model.h5')
-print("Model saved as 'mnist_model.h5'")
-
-# Plot training history
-plt.figure(figsize=(12, 4))
-
-# Plot training & validation accuracy
-plt.subplot(1, 2, 1)
-plt.plot(history.history['accuracy'])
-plt.plot(history.history['val_accuracy'])
-plt.title('Model Accuracy')
-plt.ylabel('Accuracy')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='lower right')
-
-# Plot training & validation loss
-plt.subplot(1, 2, 2)
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('Model Loss')
-plt.ylabel('Loss')
-plt.xlabel('Epoch')
-plt.legend(['Train', 'Validation'], loc='upper right')
-
-plt.tight_layout()
-plt.savefig('visualizations/training_history.png')
-plt.show()
-
-# Visualize some predictions
-def visualize_predictions(model, images, labels, num_samples=10):
-    # Get predictions
-    predictions = model.predict(images[:num_samples])
-    predicted_classes = np.argmax(predictions, axis=1)
-    true_classes = np.argmax(labels[:num_samples], axis=1)
+def plot_training_history(history):
+    """Plot training history."""
+    print("\nPlotting training history...")
     
-    # Plot images with predictions
-    plt.figure(figsize=(15, 3))
-    for i in range(num_samples):
-        plt.subplot(1, num_samples, i+1)
-        plt.imshow(images[i].reshape(28, 28), cmap='gray')
-        
-        color = 'green' if predicted_classes[i] == true_classes[i] else 'red'
-        plt.title(f"Pred: {predicted_classes[i]}\nTrue: {true_classes[i]}", color=color)
-        plt.axis('off')
+    # Create directory for visualizations if it doesn't exist
+    if not os.path.exists('visualizations'):
+        os.makedirs('visualizations')
     
+    # Plot training history
+    plt.figure(figsize=(12, 4))
+    
+    # Plot accuracy
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Model Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    
+    # Plot loss
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Model Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    # Save plot
     plt.tight_layout()
-    plt.savefig('visualizations/prediction_samples.png')
-    plt.show()
+    plt.savefig('visualizations/training_history.png')
+    plt.close()
+    
+    print("Training history plot saved as 'visualizations/training_history.png'")
 
-# Visualize predictions on test data
-visualize_predictions(model, test_images, test_labels)
+def save_model(model):
+    """Save the trained model."""
+    print("\nSaving model...")
+    
+    # Create models directory if it doesn't exist
+    if not os.path.exists('models'):
+        os.makedirs('models')
+    
+    model.save('models/mnist_model.h5')
+    print("Model saved as 'models/mnist_model.h5'")
+
+def main():
+    """Main function to train and evaluate the MNIST digit recognition model."""
+    print("MNIST Digit Recognition - Model Training")
+    print("=======================================")
+    
+    # Load and preprocess data
+    (x_train, y_train), (x_test, y_test) = load_and_preprocess_data()
+    
+    # Create model
+    model = create_model()
+    model.summary()
+    
+    # Train model
+    history = train_model(model, x_train, y_train, x_test, y_test)
+    
+    # Evaluate model
+    evaluate_model(model, x_test, y_test)
+    
+    # Plot training history
+    plot_training_history(history)
+    
+    # Save model
+    save_model(model)
+    
+    print("\nTraining complete! You can now use the model with draw_and_recognize.py")
+
+if __name__ == "__main__":
+    main()
