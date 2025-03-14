@@ -1,166 +1,142 @@
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-import matplotlib.pyplot as plt
-import cv2
-from PIL import Image, ImageOps
 import os
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import load_model
+from PIL import Image
+import cv2
+
+def load_saved_model(model_path='models/mnist_model.h5'):
+    """Load the trained model."""
+    try:
+        model = load_model(model_path)
+        print(f"Model loaded successfully from {model_path}")
+        return model
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
 
 def load_and_preprocess_image(image_path):
-    """Load and preprocess an image to match MNIST format."""
-    # Read the image
-    if isinstance(image_path, str):
-        # Check if file exists
-        if not os.path.exists(image_path):
-            print(f"Error: File {image_path} does not exist")
-            return None
-            
-        # Load from file
-        img = Image.open(image_path).convert('L')  # Convert to grayscale
-    else:
-        # Assume it's already a PIL Image or numpy array
-        img = Image.fromarray(image_path) if isinstance(image_path, np.ndarray) else image_path
-        img = img.convert('L')  # Convert to grayscale
+    """Load and preprocess a single image for prediction."""
+    try:
+        # Load image
+        img = Image.open(image_path)
+        
+        # Convert to grayscale if needed
+        if img.mode != 'L':
+            img = img.convert('L')
+        
+        # Resize to 28x28
+        img = img.resize((28, 28))
+        
+        # Convert to numpy array and normalize
+        img_array = np.array(img)
+        img_array = img_array.astype('float32') / 255.0
+        
+        # Reshape for model input
+        img_array = img_array.reshape(1, 28, 28, 1)
+        
+        return img_array, img
     
-    # Resize to 28x28
-    img = img.resize((28, 28), Image.LANCZOS)
-    
-    # Invert if necessary (MNIST has white digits on black background)
-    # This step depends on your input images - adjust as needed
-    pixel_mean = np.mean(np.array(img))
-    if pixel_mean > 128:  # If background is bright
-        img = ImageOps.invert(img)
-    
-    # Convert to numpy array and normalize
-    img_array = np.array(img).astype('float32') / 255.0
-    
-    # Reshape to match model input shape
-    img_array = img_array.reshape(1, 28, 28, 1)
-    
-    return img_array
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None, None
 
-def predict_digit(model, image_path):
-    """Predict digit from image."""
-    # Preprocess image
-    processed_img = load_and_preprocess_image(image_path)
-    if processed_img is None:
-        return None
+def predict_digit(model, img_array):
+    """Make prediction for a single image."""
+    if model is None or img_array is None:
+        return None, None
     
     # Get prediction
-    prediction = model.predict(processed_img)
-    predicted_class = np.argmax(prediction, axis=1)[0]
+    prediction = model.predict(img_array, verbose=0)
+    predicted_digit = np.argmax(prediction)
     confidence = np.max(prediction) * 100
     
-    return predicted_class, confidence, processed_img
+    return predicted_digit, confidence
 
-def draw_prediction(image_path, predicted_digit, confidence, processed_img):
-    """Display the original image and the processed image with prediction."""
-    plt.figure(figsize=(10, 5))
+def plot_prediction(img, predicted_digit, confidence, save_path=None):
+    """Plot the image with prediction results."""
+    plt.figure(figsize=(6, 6))
+    plt.imshow(img, cmap='gray')
+    plt.title(f'Predicted Digit: {predicted_digit}\nConfidence: {confidence:.1f}%')
+    plt.axis('off')
     
-    # Display original image
-    plt.subplot(1, 2, 1)
-    if isinstance(image_path, str) and os.path.exists(image_path):
-        img = plt.imread(image_path)
-        plt.imshow(img, cmap='gray' if len(img.shape) == 2 else None)
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Prediction plot saved as {save_path}")
     else:
-        plt.imshow(image_path, cmap='gray')
-    plt.title("Original Image")
-    plt.axis('off')
-    
-    # Display processed image with prediction
-    plt.subplot(1, 2, 2)
-    plt.imshow(processed_img.reshape(28, 28), cmap='gray')
-    plt.title(f"Predicted: {predicted_digit} (Conf: {confidence:.2f}%)")
-    plt.axis('off')
-    
-    plt.tight_layout()
-    plt.show()
+        plt.show()
+    plt.close()
 
-def use_webcam():
-    """Use webcam to capture digits and make predictions."""
-    model = load_model('models/mnist_model.h5')
+def test_saved_drawings(model_path='models/mnist_model.h5', drawings_dir='saved_drawings'):
+    """Test the model on saved drawings."""
+    print("\nTesting Custom Digits")
+    print("====================")
     
-    # Open webcam
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open webcam")
+    # Load model
+    model = load_saved_model(model_path)
+    if model is None:
         return
     
-    print("Instructions:")
-    print("1. Hold a paper with a handwritten digit in front of the camera")
-    print("2. Press 'c' to capture and predict")
-    print("3. Press 'q' to quit")
+    # Create visualizations directory if it doesn't exist
+    vis_dir = 'visualizations/predictions'
+    if not os.path.exists(vis_dir):
+        os.makedirs(vis_dir)
     
-    while True:
-        # Read frame from webcam
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Failed to capture image")
-            break
-        
-        # Display frame
-        cv2.imshow('Digit Recognition', frame)
-        
-        # Wait for key press
-        key = cv2.waitKey(1) & 0xFF
-        
-        # If 'c' is pressed, capture image and predict
-        if key == ord('c'):
-            # Convert to grayscale
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
-            # Add a small ROI in the center for capturing the digit
-            h, w = gray.shape
-            center_x, center_y = w // 2, h // 2
-            size = min(w, h) // 3
-            roi = gray[center_y-size:center_y+size, center_x-size:center_x+size]
-            
-            # Predict digit
-            digit, confidence, processed_img = predict_digit(model, roi)
-            print(f"Predicted digit: {digit} (Confidence: {confidence:.2f}%)")
-            
-            # Display prediction
-            cv2.putText(frame, f"Digit: {digit} ({confidence:.2f}%)", 
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow('Prediction', frame)
-            cv2.waitKey(2000)  # Show for 2 seconds
-        
-        # If 'q' is pressed, quit
-        elif key == ord('q'):
-            break
+    # Get list of saved drawings
+    if not os.path.exists(drawings_dir):
+        print(f"No drawings found in {drawings_dir}")
+        return
     
-    # Release webcam
-    cap.release()
-    cv2.destroyAllWindows()
+    drawings = [f for f in os.listdir(drawings_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    if not drawings:
+        print("No image files found in the drawings directory")
+        return
+    
+    print(f"\nFound {len(drawings)} drawings to test")
+    results = []
+    
+    # Process each drawing
+    for i, drawing in enumerate(drawings, 1):
+        print(f"\nProcessing drawing {i}/{len(drawings)}: {drawing}")
+        image_path = os.path.join(drawings_dir, drawing)
+        
+        # Load and preprocess image
+        img_array, img = load_and_preprocess_image(image_path)
+        if img_array is None:
+            continue
+        
+        # Make prediction
+        predicted_digit, confidence = predict_digit(model, img_array)
+        if predicted_digit is None:
+            continue
+        
+        # Store results
+        results.append({
+            'filename': drawing,
+            'predicted': predicted_digit,
+            'confidence': confidence
+        })
+        
+        # Plot and save prediction
+        save_path = os.path.join(vis_dir, f'prediction_{drawing}')
+        plot_prediction(img, predicted_digit, confidence, save_path)
+    
+    # Print summary
+    if results:
+        print("\nPrediction Summary:")
+        print("------------------")
+        for result in results:
+            print(f"File: {result['filename']}")
+            print(f"Predicted Digit: {result['predicted']}")
+            print(f"Confidence: {result['confidence']:.1f}%")
+            print("------------------")
+        
+        # Calculate average confidence
+        avg_confidence = np.mean([r['confidence'] for r in results])
+        print(f"\nAverage confidence across all predictions: {avg_confidence:.1f}%")
+        print(f"\nPrediction visualizations saved in {vis_dir}")
+    else:
+        print("\nNo successful predictions made")
 
 if __name__ == "__main__":
-    # Load trained model
-    model = load_model('models/mnist_model.h5')
-    
-    # Test mode selection
-    print("Select test mode:")
-    print("1. Test with a single image file")
-    print("2. Use webcam for real-time digit recognition")
-    
-    choice = input("Enter choice (1 or 2): ")
-    
-    if choice == '1':
-        # Test with an image file
-        image_path = input("Enter path to image file: ")
-        
-        # Predict digit
-        result = predict_digit(model, image_path)
-        if result:
-            digit, confidence, processed_img = result
-            print(f"Predicted digit: {digit}")
-            print(f"Confidence: {confidence:.2f}%")
-            
-            # Draw prediction
-            draw_prediction(image_path, digit, confidence, processed_img)
-    
-    elif choice == '2':
-        # Use webcam
-        use_webcam()
-    
-    else:
-        print("Invalid choice")
+    test_saved_drawings()
