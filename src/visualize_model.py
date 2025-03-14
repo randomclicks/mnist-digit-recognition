@@ -1,192 +1,213 @@
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import load_model
 import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
-from sklearn.metrics import confusion_matrix
-import seaborn as sns
+from tensorflow.keras.models import load_model
+from tensorflow.keras.datasets import mnist
+import os
 
-# Load the MNIST dataset
-(train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
-
-# Normalize pixel values to be between 0 and 1
-train_images = train_images.astype('float32') / 255.0
-test_images = test_images.astype('float32') / 255.0
-
-# Reshape the images to add the channel dimension (MNIST is grayscale)
-train_images = train_images.reshape(train_images.shape[0], 28, 28, 1)
-test_images = test_images.reshape(test_images.shape[0], 28, 28, 1)
-
-def visualize_confusion_matrix(model):
-    """Visualize the confusion matrix of model predictions."""
-    # Get predictions
-    predictions = model.predict(test_images)
-    predicted_classes = np.argmax(predictions, axis=1)
+def load_data():
+    """Load and preprocess MNIST test data."""
+    print("Loading MNIST test data...")
+    (_, _), (x_test, y_test) = mnist.load_data()
     
-    # Create confusion matrix
-    cm = confusion_matrix(test_labels, predicted_classes)
+    # Normalize pixel values
+    x_test = x_test.astype('float32') / 255.0
+    
+    # Reshape for CNN input
+    x_test = x_test.reshape(x_test.shape[0], 28, 28, 1)
+    
+    return x_test, y_test
+
+def load_saved_model(model_path='models/mnist_model.h5'):
+    """Load the trained model."""
+    try:
+        model = load_model(model_path)
+        print(f"Model loaded successfully from {model_path}")
+        return model
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
+
+def visualize_predictions(model, x_test, y_test, num_samples=10):
+    """Visualize model predictions on random test samples."""
+    print("\nGenerating prediction visualizations...")
+    
+    # Create visualizations directory if it doesn't exist
+    vis_dir = 'visualizations/samples'
+    if not os.path.exists(vis_dir):
+        os.makedirs(vis_dir)
+    
+    # Get random samples
+    indices = np.random.randint(0, x_test.shape[0], num_samples)
+    
+    # Create figure
+    plt.figure(figsize=(15, 6))
+    
+    for i, idx in enumerate(indices):
+        # Get sample and prediction
+        img = x_test[idx]
+        true_label = y_test[idx]
+        
+        # Make prediction
+        pred = model.predict(img.reshape(1, 28, 28, 1), verbose=0)
+        pred_label = np.argmax(pred)
+        confidence = np.max(pred) * 100
+        
+        # Plot
+        plt.subplot(2, 5, i + 1)
+        plt.imshow(img.reshape(28, 28), cmap='gray')
+        color = 'green' if pred_label == true_label else 'red'
+        plt.title(f'True: {true_label}\nPred: {pred_label}\nConf: {confidence:.1f}%', 
+                 color=color)
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(vis_dir, 'sample_predictions.png'))
+    plt.close()
+    
+    print("Sample predictions visualization saved as 'visualizations/samples/sample_predictions.png'")
+
+def visualize_confusion_matrix(model, x_test, y_test):
+    """Generate and plot confusion matrix."""
+    print("\nGenerating confusion matrix...")
+    
+    # Create visualizations directory if it doesn't exist
+    vis_dir = 'visualizations/analysis'
+    if not os.path.exists(vis_dir):
+        os.makedirs(vis_dir)
+    
+    # Get predictions
+    predictions = model.predict(x_test, verbose=0)
+    pred_classes = np.argmax(predictions, axis=1)
+    
+    # Calculate confusion matrix
+    conf_matrix = np.zeros((10, 10), dtype=int)
+    for true, pred in zip(y_test, pred_classes):
+        conf_matrix[true, pred] += 1
     
     # Plot confusion matrix
     plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
-                xticklabels=range(10), yticklabels=range(10))
+    plt.imshow(conf_matrix, cmap='Blues')
+    plt.colorbar()
+    
+    # Add labels and title
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
     plt.title('Confusion Matrix')
-    plt.savefig('visualizations/confusion_matrix.png')
-    plt.show()
     
-    # Calculate and print classification report
-    from sklearn.metrics import classification_report
-    print("\nClassification Report:")
-    print(classification_report(test_labels, predicted_classes))
-
-def visualize_feature_maps(model, image_idx=0):
-    """Visualize feature maps from different convolutional layers."""
-    # Create a model that outputs feature maps from each convolutional layer
-    layer_outputs = [layer.output for layer in model.layers if 'conv' in layer.name.lower()]
-    activation_model = tf.keras.models.Model(inputs=model.input, outputs=layer_outputs)
-    
-    # Get feature maps for a single image
-    img = test_images[image_idx:image_idx+1]
-    activations = activation_model.predict(img)
-    
-    # Display the original image
-    plt.figure(figsize=(8, 8))
-    plt.imshow(test_images[image_idx].reshape(28, 28), cmap='gray')
-    plt.title(f'Original Image (Label: {test_labels[image_idx]})')
-    plt.axis('off')
-    plt.savefig('visualizations/original_image.png')
-    plt.show()
-    
-    # Display feature maps from each layer
-    for i, layer_activation in enumerate(activations):
-        # Get the number of features in the feature map
-        n_features = layer_activation.shape[-1]
-        
-        # Determine grid size
-        size = int(np.ceil(np.sqrt(n_features)))
-        
-        # Create figure with subplots
-        fig, axs = plt.subplots(size, size, figsize=(12, 12))
-        fig.suptitle(f'Feature Maps from Convolutional Layer {i+1}', fontsize=16)
-        
-        # Plot each feature map
-        for j in range(n_features):
-            row, col = j // size, j % size
-            ax = axs[row, col]
-            ax.imshow(layer_activation[0, :, :, j], cmap='viridis')
-            ax.set_xticks([])
-            ax.set_yticks([])
-        
-        # Hide empty subplots
-        for j in range(n_features, size*size):
-            row, col = j // size, j % size
-            axs[row, col].axis('off')
-        
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.95)
-        plt.savefig(f'visualizations/feature_maps_layer{i+1}.png')
-        plt.show()
-
-def visualize_embedding(model, samples=5000):
-    """Visualize digit embeddings using t-SNE."""
-    # Create a model that outputs the features before classification
-    feature_model = tf.keras.models.Model(inputs=model.input, 
-                                          outputs=model.layers[-2].output)
-    
-    # Get features for a subset of test images
-    features = feature_model.predict(test_images[:samples])
-    labels = test_labels[:samples]
-    
-    # Use t-SNE to reduce dimensionality for visualization
-    tsne = TSNE(n_components=2, random_state=42)
-    features_2d = tsne.fit_transform(features)
-    
-    # Plot t-SNE visualization
-    plt.figure(figsize=(12, 10))
-    colors = plt.cm.tab10(np.linspace(0, 1, 10))
-    
+    # Add text annotations
     for i in range(10):
-        plt.scatter(features_2d[labels == i, 0], features_2d[labels == i, 1],
-                    color=colors[i], label=f"Digit {i}", alpha=0.7)
+        for j in range(10):
+            plt.text(j, i, str(conf_matrix[i, j]),
+                    ha='center', va='center')
     
-    plt.title('t-SNE Visualization of Digit Features')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig('visualizations/tsne_embedding.png')
-    plt.show()
+    plt.savefig(os.path.join(vis_dir, 'confusion_matrix.png'))
+    plt.close()
+    
+    print("Confusion matrix saved as 'visualizations/analysis/confusion_matrix.png'")
 
-def visualize_misclassified(model, num_samples=10):
-    """Visualize some misclassified digits."""
+def visualize_confidence_distribution(model, x_test, y_test):
+    """Visualize the distribution of prediction confidences."""
+    print("\nGenerating confidence distribution plot...")
+    
+    # Create visualizations directory if it doesn't exist
+    vis_dir = 'visualizations/analysis'
+    if not os.path.exists(vis_dir):
+        os.makedirs(vis_dir)
+    
+    # Get predictions and confidences
+    predictions = model.predict(x_test, verbose=0)
+    confidences = np.max(predictions, axis=1) * 100
+    correct = (np.argmax(predictions, axis=1) == y_test)
+    
+    # Create figure
+    plt.figure(figsize=(10, 6))
+    
+    # Plot histograms
+    plt.hist(confidences[correct], bins=50, alpha=0.5, label='Correct Predictions',
+             color='green', density=True)
+    plt.hist(confidences[~correct], bins=50, alpha=0.5, label='Incorrect Predictions',
+             color='red', density=True)
+    
+    # Add labels and title
+    plt.xlabel('Confidence (%)')
+    plt.ylabel('Density')
+    plt.title('Distribution of Model Confidence')
+    plt.legend()
+    
+    plt.savefig(os.path.join(vis_dir, 'confidence_distribution.png'))
+    plt.close()
+    
+    print("Confidence distribution plot saved as 'visualizations/analysis/confidence_distribution.png'")
+
+def analyze_errors(model, x_test, y_test):
+    """Analyze and visualize the most confident errors."""
+    print("\nAnalyzing prediction errors...")
+    
+    # Create visualizations directory if it doesn't exist
+    vis_dir = 'visualizations/errors'
+    if not os.path.exists(vis_dir):
+        os.makedirs(vis_dir)
+    
     # Get predictions
-    predictions = model.predict(test_images)
-    predicted_classes = np.argmax(predictions, axis=1)
+    predictions = model.predict(x_test, verbose=0)
+    pred_classes = np.argmax(predictions, axis=1)
+    confidences = np.max(predictions, axis=1) * 100
     
-    # Find misclassified examples
-    misclassified_indices = np.where(predicted_classes != test_labels)[0]
+    # Find errors
+    errors = pred_classes != y_test
+    error_indices = np.where(errors)[0]
     
-    if len(misclassified_indices) > 0:
-        # Select random misclassified examples
-        selected_indices = np.random.choice(misclassified_indices, 
-                                           min(num_samples, len(misclassified_indices)), 
-                                           replace=False)
+    if len(error_indices) == 0:
+        print("No errors found in test set!")
+        return
+    
+    # Sort errors by confidence
+    error_confidences = confidences[error_indices]
+    sorted_indices = error_indices[np.argsort(error_confidences)][::-1]
+    
+    # Plot top 10 most confident errors
+    num_errors = min(10, len(sorted_indices))
+    plt.figure(figsize=(15, 6))
+    
+    for i in range(num_errors):
+        idx = sorted_indices[i]
+        img = x_test[idx]
+        true_label = y_test[idx]
+        pred_label = pred_classes[idx]
+        confidence = confidences[idx]
         
-        # Plot misclassified examples
-        plt.figure(figsize=(15, 3))
-        for i, idx in enumerate(selected_indices):
-            plt.subplot(1, num_samples, i+1)
-            plt.imshow(test_images[idx].reshape(28, 28), cmap='gray')
-            plt.title(f"True: {test_labels[idx]}\nPred: {predicted_classes[idx]}")
-            plt.axis('off')
-        
-        plt.tight_layout()
-        plt.savefig('visualizations/misclassified_examples.png')
-        plt.show()
-    else:
-        print("No misclassified examples found!")
+        plt.subplot(2, 5, i + 1)
+        plt.imshow(img.reshape(28, 28), cmap='gray')
+        plt.title(f'True: {true_label}\nPred: {pred_label}\nConf: {confidence:.1f}%',
+                 color='red')
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(vis_dir, 'confident_errors.png'))
+    plt.close()
+    
+    print("Most confident errors visualization saved as 'visualizations/errors/confident_errors.png'")
+
+def main():
+    """Main function to generate model visualizations."""
+    print("MNIST Model Visualization")
+    print("========================")
+    
+    # Load test data
+    x_test, y_test = load_data()
+    
+    # Load model
+    model = load_saved_model()
+    if model is None:
+        return
+    
+    # Generate visualizations
+    visualize_predictions(model, x_test, y_test)
+    visualize_confusion_matrix(model, x_test, y_test)
+    visualize_confidence_distribution(model, x_test, y_test)
+    analyze_errors(model, x_test, y_test)
+    
+    print("\nVisualization complete! Check the 'visualizations' directory for all plots.")
 
 if __name__ == "__main__":
-    # Load trained model
-    try:
-        model = load_model('models/mnist_model.h5')
-        print("Model loaded successfully!")
-        
-        # Visualization menu
-        while True:
-            print("\nVisualization Options:")
-            print("1. Confusion Matrix")
-            print("2. Feature Maps")
-            print("3. t-SNE Embedding")
-            print("4. Misclassified Examples")
-            print("5. All Visualizations")
-            print("6. Exit")
-            
-            choice = input("Enter your choice (1-6): ")
-            
-            if choice == '1':
-                visualize_confusion_matrix(model)
-            elif choice == '2':
-                image_idx = int(input("Enter image index (0-9999): ") or "0")
-                visualize_feature_maps(model, image_idx)
-            elif choice == '3':
-                samples = int(input("Enter number of samples (default: 5000): ") or "5000")
-                visualize_embedding(model, samples)
-            elif choice == '4':
-                num_samples = int(input("Enter number of examples to show (default: 10): ") or "10")
-                visualize_misclassified(model, num_samples)
-            elif choice == '5':
-                print("Generating all visualizations...")
-                visualize_confusion_matrix(model)
-                visualize_feature_maps(model)
-                visualize_embedding(model)
-                visualize_misclassified(model)
-            elif choice == '6':
-                print("Exiting...")
-                break
-            else:
-                print("Invalid choice!")
-    
-    except Exception as e:
-        print(f"Error: {e}")
-        print("Make sure to train the model first by running mnist_digit_recognition.py")
+    main()
